@@ -1,6 +1,6 @@
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit, join_room
-
+import os 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
@@ -20,5 +20,9 @@ def transfer_data(data):
     room = data['room']
     emit('data', data, room=room, skip_sid=True)
 
+
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    # Get port from environment variable, default to 5000
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host='0.0.0.0', port=port)
+
