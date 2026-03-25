@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <h2>Python Video Chat</h2>
+    <video id="localVideo" autoplay muted style="width:300px; border:2px solid black;"></video>
+    <video id="remoteVideo" autoplay style="width:300px; border:2px solid red;"></video>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const pc = new RTCPeerConnection(); // The WebRTC object
+
+        // 1. Get Camera
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                document.getElementById('localVideo').srcObject = stream;
+                stream.getTracks().forEach(track => pc.addTrack(track, stream));
+            });
+
+        // 2. Handle incoming video
+        pc.ontrack = (event) => {
+            document.getElementById('remoteVideo').srcObject = event.streams[0];
+        };
+
+        // 3. Signaling logic (The handshake)
+        socket.emit('join', {room: 'test-room'});
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) socket.emit('data', {candidate: event.candidate, room: 'test-room'});
+        };
+
+        socket.on('data', async (data) => {
+            if (data.offer) {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.emit('data', {answer: answer, room: 'test-room'});
+            } else if (data.answer) {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            } else if (data.candidate) {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        });
+
+        socket.on('ready', async () => {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('data', {offer: offer, room: 'test-room'});
+        });
+    </script>
+</body>
+</html>
