@@ -1,52 +1,144 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Video Chat</title>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .video-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+        video {
+            width: 350px;
+            height: 260px;
+            background: #1e293b;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            object-fit: cover;
+        }
+        #remoteVideo { border: 2px solid #3b82f6; }
+        #localVideo { border: 2px solid #10b981; }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+        button:active { transform: scale(0.95); }
+        .btn-cam { background-color: #334155; color: white; }
+        .btn-end { background-color: #ef4444; color: white; }
+        .hidden { display: none; }
+    </style>
+</head>
 <body>
-    <h2>Python Video Chat</h2>
-    <video id="localVideo" autoplay muted style="width:300px; border:2px solid black;"></video>
-    <video id="remoteVideo" autoplay style="width:300px; border:2px solid red;"></video>
+
+    <h2>Video Chat Room</h2>
+
+    <div class="video-container">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <div class="controls">
+        <button id="toggleCam" class="btn-cam">Hide Camera</button>
+        <button id="endCall" class="btn-end">End Call</button>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
         const socket = io();
-        const pc = new RTCPeerConnection(); // The WebRTC object
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const roomName = 'test-room';
+        let localStream;
 
-        // 1. Get Camera
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-            .then(stream => {
-                document.getElementById('localVideo').srcObject = stream;
-                stream.getTracks().forEach(track => pc.addTrack(track, stream));
-            });
-
-        // 2. Handle incoming video
-        pc.ontrack = (event) => {
-            document.getElementById('remoteVideo').srcObject = event.streams[0];
+        // Configuration with Google STUN servers (CRITICAL FOR LIVE WEB)
+        const configuration = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
         };
+        
+        let pc = new RTCPeerConnection(configuration);
 
-        // 3. Signaling logic (The handshake)
-        socket.emit('join', {room: 'test-room'});
+        // 1. Setup Camera
+        async function start() {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = localStream;
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+            
+            socket.emit('join', {room: roomName});
+        }
+
+        // 2. WebRTC Events
+        pc.ontrack = (event) => {
+            remoteVideo.srcObject = event.streams[0];
+        };
 
         pc.onicecandidate = (event) => {
-            if (event.candidate) socket.emit('data', {candidate: event.candidate, room: 'test-room'});
+            if (event.candidate) {
+                socket.emit('data', {candidate: event.candidate, room: roomName});
+            }
         };
+
+        // 3. Signaling Logic
+        socket.on('ready', async () => {
+            // New user joined: Create the offer
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('data', {offer: offer, room: roomName});
+        });
 
         socket.on('data', async (data) => {
             if (data.offer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
-                socket.emit('data', {answer: answer, room: 'test-room'});
+                socket.emit('data', {answer: answer, room: roomName});
             } else if (data.answer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
             } else if (data.candidate) {
-                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                try {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (e) { console.error("Error adding ice candidate", e); }
             }
         });
 
-        socket.on('ready', async () => {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            socket.emit('data', {offer: offer, room: 'test-room'});
-        });
+        // 4. Feature: Toggle Camera
+        document.getElementById('toggleCam').onclick = () => {
+            const videoTrack = localStream.getVideoTracks()[0];
+            videoTrack.enabled = !videoTrack.enabled;
+            document.getElementById('toggleCam').innerText = videoTrack.enabled ? "Hide Camera" : "Show Camera";
+        };
+
+        // 5. Feature: End Call
+        document.getElementById('endCall').onclick = () => {
+            pc.close();
+            localStream.getTracks().forEach(track => track.stop());
+            window.location.reload(); // Refresh to reset
+        };
+
+        start();
     </script>
 </body>
 </html>
